@@ -1,0 +1,22 @@
+###合并lora
+CUDA_VISIBLE_DEVICES=0 python src/export_model.py --model_name_or_path /workspace/nerv-model/Qwen-1_8B-Chat --adapter_name_or_path /workspace/nerv-model/lora/train_2024-03-26-07-55-53/checkpoint-9100 --template default --finetuning_type lora --export_dir /workspace/nerv-model/Qwen-1_8B-Chat-lora --export_size 2 --export_legacy_format False
+
+
+###保存镜像
+docker save -o d:/nerv_image1.tar nerv_image:1
+###释放镜像
+docker load -i d:/nerv_image1.tar
+
+
+
+
+启动控制器 python -m nerv.serve.controller --host 0.0.0.0
+启动vllm工作器 CUDA_VISIBLE_DEVICES=0 python -m nerv.serve.vllm_worker --model-path Qwen/Qwen1.5-14B-Chat-GPTQ-Int4/ --model-name gpt-3.5-turbo --host 0.0.0.0 --max-model-len 2048 --gpu-memory-utilization 0.9
+启动sglang工作器 python -m nerv.serve.sglang_worker --model-path Qwen/Qwen1.5-14B-Chat-AWQ/ --model-name gpt-3.5-turbo --host 0.0.0.0
+启动服务器 python -m nerv.serve.openai_api_server --host 0.0.0.0 --port 6666
+启动代码编辑 jupyter lab --ip=0.0.0.0 --port=8888 --no-browser --allow-root
+启动chatchat python startup.py --all-webui
+
+容器配置 -gpus all --ulimit memlock=-1 --ulimit stack=67108864 --ipc=host
+
+

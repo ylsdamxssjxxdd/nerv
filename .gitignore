@@ -1,0 +1,12 @@
+.idea/
+nerv-workspace/
+!nerv-workspace/这里是总部的主要工作目录.txt
+nerv-model/
+!nerv-model/在这里放置待微调的模型.txt
+nerv-image/
+!nerv-image/在这里放置构建好的镜像文件.txt
+nerv-docker/
+!nerv-docker/dockerfile
+!nerv-docker/在这里放置构建镜像的dockerfile文件.txt
+nerv-dataset/
+!nerv-dataset/在这里放置训练用的数据集.txt
