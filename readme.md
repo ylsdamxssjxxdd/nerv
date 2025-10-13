@@ -7,9 +7,7 @@
 - 补完
 
 ## 编译
-git clone https://github.com/ylsdamxssjxxdd/nerv.git
-cmake -B build .
-cmake --build build --config Release -j24
+运行脚本
 
 ## 更新后端时注意
 - stable-diffusion.cpp 搜索 LOG_DEBUG("Using Vulkan backend");替换为如下代码
