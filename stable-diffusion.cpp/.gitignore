@@ -1,0 +1,14 @@
+build*/
+cmake-build-*/
+test/
+.vscode/
+.idea/
+.cache/
+*.swp
+*.bat
+*.bin
+*.exe
+*.gguf
+output*.png
+models*
+*.log
