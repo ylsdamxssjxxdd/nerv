@@ -73,6 +73,8 @@ function(eva_add_3rdparty_for_device DEVICE)
         if (${_dev} STREQUAL "cuda")
             set(LLAMA_COPY_TARGETS "llama-server")
         endif()
+        # Escape semicolons so -Dtargets remains a single argument in COMMAND (Linux/macOS shells)
+        string(REPLACE ";" "\\;" LLAMA_COPY_TARGETS_ESC "${LLAMA_COPY_TARGETS}")
         ExternalProject_Add(llama_${_dev}
             SOURCE_DIR ${_ll_src}
             BINARY_DIR ${_ll_bin}
@@ -92,7 +94,7 @@ function(eva_add_3rdparty_for_device DEVICE)
                 COMMAND ${CMAKE_COMMAND}
                     -Dsrc_bin=${_ll_bin}/bin
                     -Ddst_dir=${_ll_dst}
-                    -Dtargets=${LLAMA_COPY_TARGETS}
+                    -Dtargets=${LLAMA_COPY_TARGETS_ESC}
                     -Dexe_sfx=${EVA_EXE_SUFFIX}
                     -P ${CMAKE_SOURCE_DIR}/cmake/CopyOutputs.cmake
         )
