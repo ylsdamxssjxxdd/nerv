@@ -8,8 +8,8 @@ include(EvaPaths)
 
 # User options
 option(EVA_BUILD_LLAMA   "Build llama.cpp targets" ON)
-option(EVA_BUILD_WHISPER "Build whisper.cpp targets" OFF)
-option(EVA_BUILD_SD      "Build stable-diffusion.cpp targets" OFF)
+option(EVA_BUILD_WHISPER "Build whisper.cpp targets" ON)
+option(EVA_BUILD_SD      "Build stable-diffusion.cpp targets" ON)
 
 # Per-project CUDA toggles (default OFF for whisper/sd; llama uses global EVA_BUILD_CUDA)
 option(EVA_BUILD_WHISPER_CUDA "Build CUDA variant of whisper.cpp" OFF)

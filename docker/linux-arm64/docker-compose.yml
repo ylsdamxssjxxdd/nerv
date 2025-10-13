@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  qt-linux-arm:
+    platform: linux/arm64     # 强制使用 ARM64 架构
+    image: sjxx-qt-linux-arm:20251013-cpu
+    privileged: true # 特权模式
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "7759:7759"           # 开放端口
+    volumes:
+      - ./workspace:/workspace  # 工作目录
+      - ./distribution:/distribution  # 预编译好的库目录
+    stdin_open: true          # 保持 STDIN 开放
+    tty: true                 # 分配伪终端
+    # restart: unless-stopped # 总是重启，除非手动停止
+    command: jupyter lab --ServerApp.ip="*" --ServerApp.password="" --ServerApp.token="" --no-browser --allow-root --port 7759
