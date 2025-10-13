@@ -11,6 +11,10 @@ option(EVA_BUILD_LLAMA   "Build llama.cpp targets" ON)
 option(EVA_BUILD_WHISPER "Build whisper.cpp targets" OFF)
 option(EVA_BUILD_SD      "Build stable-diffusion.cpp targets" OFF)
 
+# Per-project CUDA toggles (default OFF for whisper/sd; llama uses global EVA_BUILD_CUDA)
+option(EVA_BUILD_WHISPER_CUDA "Build CUDA variant of whisper.cpp" OFF)
+option(EVA_BUILD_SD_CUDA      "Build CUDA variant of stable-diffusion.cpp" OFF)
+
 # Summary of detection
 message(STATUS "EVA platform: arch=${EVA_ARCH}, os=${EVA_OS}")
 message(STATUS "Detected devices: CUDA=${EVA_HAS_CUDA}, Vulkan=${EVA_HAS_VULKAN}, OpenCL=${EVA_HAS_OPENCL}")
@@ -52,6 +56,7 @@ function(eva_add_3rdparty_for_device DEVICE)
         -DBUILD_SHARED_LIBS=OFF
         -DGGML_STATIC=ON
         -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+        -DGGML_NATIVE=OFF
         )
 
     # Build llama.cpp (server/quantize/tts)
@@ -60,6 +65,11 @@ function(eva_add_3rdparty_for_device DEVICE)
         set(_ll_bin ${CMAKE_BINARY_DIR}/build-llama-${_dev})
         eva_backend_dir(_ll_dst ${_dev} "llama.cpp")
 
+        # Device-specific copy targets: for CUDA, only copy llama-server
+        set(LLAMA_COPY_TARGETS "llama-server;llama-quantize;llama-tts")
+        if (${_dev} STREQUAL "cuda")
+            set(LLAMA_COPY_TARGETS "llama-server")
+        endif()
         ExternalProject_Add(llama_${_dev}
             SOURCE_DIR ${_ll_src}
             BINARY_DIR ${_ll_bin}
@@ -72,19 +82,21 @@ function(eva_add_3rdparty_for_device DEVICE)
                 ${COMMON_GGML_ARGS}
             BUILD_BYPRODUCTS
                 ${_ll_bin}/bin/llama-server${EVA_EXE_SUFFIX}
+                ${_ll_bin}/bin/llama-quantize${EVA_EXE_SUFFIX}
+                ${_ll_bin}/bin/llama-tts${EVA_EXE_SUFFIX}
             INSTALL_COMMAND
                 ${CMAKE_COMMAND} -E make_directory "${_ll_dst}"
                 COMMAND ${CMAKE_COMMAND}
                     -Dsrc_bin=${_ll_bin}/bin
                     -Ddst_dir=${_ll_dst}
-                    -Dtargets=llama-server;llama-quantize;llama-tts
+                    -Dtargets=${LLAMA_COPY_TARGETS}
                     -Dexe_sfx=${EVA_EXE_SUFFIX}
                     -P ${CMAKE_SOURCE_DIR}/cmake/CopyOutputs.cmake
         )
     endif()
 
     # Build whisper.cpp (whisper-cli)
-    if (EVA_BUILD_WHISPER)
+    if (EVA_BUILD_WHISPER AND (NOT _dev STREQUAL "cuda" OR EVA_BUILD_WHISPER_CUDA))
         set(_wp_src ${CMAKE_SOURCE_DIR}/whisper.cpp)
         set(_wp_bin ${CMAKE_BINARY_DIR}/build-whisper-${_dev})
         eva_backend_dir(_wp_dst ${_dev} "whisper.cpp")
@@ -112,7 +124,7 @@ function(eva_add_3rdparty_for_device DEVICE)
     endif()
 
     # Build stable-diffusion.cpp (sd)
-    if (EVA_BUILD_SD)
+    if (EVA_BUILD_SD AND (NOT _dev STREQUAL "cuda" OR EVA_BUILD_SD_CUDA))
         set(_sd_src ${CMAKE_SOURCE_DIR}/stable-diffusion.cpp)
         set(_sd_bin ${CMAKE_BINARY_DIR}/build-sd-${_dev})
         eva_backend_dir(_sd_dst ${_dev} "stable-diffusion.cpp")
@@ -184,10 +196,12 @@ if (EVA_BUILD_LLAMA)
         list(APPEND _eva_all_deps llama_opencl)
     endif()
 endif()
-if (EVA_BUILD_WHISPER)
+    if (EVA_BUILD_WHISPER AND (NOT _dev STREQUAL "cuda" OR EVA_BUILD_WHISPER_CUDA))
     list(APPEND _eva_all_deps whisper_cpu)
     if (EVA_BUILD_CUDA AND EVA_HAS_CUDA)
-        list(APPEND _eva_all_deps whisper_cuda)
+        if (EVA_BUILD_WHISPER_CUDA)
+            list(APPEND _eva_all_deps whisper_cuda)
+        endif()
     endif()
     if (EVA_BUILD_VULKAN AND EVA_HAS_VULKAN)
         list(APPEND _eva_all_deps whisper_vulkan)
@@ -196,10 +210,12 @@ if (EVA_BUILD_WHISPER)
         list(APPEND _eva_all_deps whisper_opencl)
     endif()
 endif()
-if (EVA_BUILD_SD)
+    if (EVA_BUILD_SD AND (NOT _dev STREQUAL "cuda" OR EVA_BUILD_SD_CUDA))
     list(APPEND _eva_all_deps sd_cpu)
     if (EVA_BUILD_CUDA AND EVA_HAS_CUDA)
-        list(APPEND _eva_all_deps sd_cuda)
+        if (EVA_BUILD_SD_CUDA)
+            list(APPEND _eva_all_deps sd_cuda)
+        endif()
     endif()
     if (EVA_BUILD_VULKAN AND EVA_HAS_VULKAN)
         list(APPEND _eva_all_deps sd_vulkan)
