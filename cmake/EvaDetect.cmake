@@ -68,9 +68,9 @@ endif()
 
 # Build toggles (auto-detected by default, can be overridden by user)
 option(EVA_BUILD_CPU    "Build CPU variants"                           ON)
-option(EVA_BUILD_CUDA   "Build CUDA variants if available"             ${EVA_HAS_CUDA})
+option(EVA_BUILD_CUDA   "Build CUDA variants (OFF by default)"             OFF)
 option(EVA_BUILD_VULKAN "Build Vulkan variants if available"           ${EVA_HAS_VULKAN})
-option(EVA_BUILD_OPENCL "Build OpenCL variants if available"           ${EVA_HAS_OPENCL})
+option(EVA_BUILD_OPENCL "Build OpenCL variants (OFF by default)"           OFF)
 
 # Resolve exe suffix once
 if (WIN32)

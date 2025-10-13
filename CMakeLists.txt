@@ -83,6 +83,8 @@ function(eva_add_3rdparty_for_device DEVICE)
                 -DLLAMA_BUILD_TOOLS=ON
                 -DLLAMA_BUILD_EXAMPLES=OFF
                 -DLLAMA_BUILD_SERVER=ON
+                
+                -DLLAMA_BUILD_TESTS=OFF
                 -DLLAMA_CURL=OFF
                 ${COMMON_GGML_ARGS}
             BUILD_BYPRODUCTS
@@ -114,6 +116,8 @@ function(eva_add_3rdparty_for_device DEVICE)
                 -DWHISPER_BUILD_EXAMPLES=ON
                 -DWHISPER_BUILD_SERVER=OFF
                 -DWHISPER_CURL=OFF
+                
+                -DWHISPER_BUILD_TESTS=OFF
                 ${COMMON_GGML_ARGS}
             BUILD_BYPRODUCTS
                 ${_wp_bin}/bin/whisper-cli${EVA_EXE_SUFFIX}
@@ -141,6 +145,7 @@ function(eva_add_3rdparty_for_device DEVICE)
             CMAKE_ARGS
                 -DSD_BUILD_EXAMPLES=ON
                 -DSD_BUILD_SHARED_LIBS=OFF
+                -DSD_BUILD_TESTS=OFF
                 -DSD_CUDA=${SD_OPT_CUDA}
                 -DSD_VULKAN=${SD_OPT_VULKAN}
                 -DSD_OPENCL=${SD_OPT_OPENCL}
