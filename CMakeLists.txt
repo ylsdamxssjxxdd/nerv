@@ -8,8 +8,8 @@ include(EvaPaths)
 
 # User options
 option(EVA_BUILD_LLAMA   "Build llama.cpp targets" ON)
-option(EVA_BUILD_WHISPER "Build whisper.cpp targets" ON)
-option(EVA_BUILD_SD      "Build stable-diffusion.cpp targets" ON)
+option(EVA_BUILD_WHISPER "Build whisper.cpp targets" OFF)
+option(EVA_BUILD_SD      "Build stable-diffusion.cpp targets" OFF)
 
 # Summary of detection
 message(STATUS "EVA platform: arch=${EVA_ARCH}, os=${EVA_OS}")
@@ -49,7 +49,10 @@ function(eva_add_3rdparty_for_device DEVICE)
         -DGGML_VULKAN=${OPT_GGML_VULKAN}
         -DGGML_OPENCL=${OPT_GGML_OPENCL}
         -DGGML_ALL_WARNINGS=OFF
-    )
+        -DBUILD_SHARED_LIBS=OFF
+        -DGGML_STATIC=ON
+        -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+        )
 
     # Build llama.cpp (server/quantize/tts)
     if (EVA_BUILD_LLAMA)
@@ -65,7 +68,7 @@ function(eva_add_3rdparty_for_device DEVICE)
                 -DLLAMA_BUILD_TOOLS=ON
                 -DLLAMA_BUILD_EXAMPLES=OFF
                 -DLLAMA_BUILD_SERVER=ON
-                -DLLAMA_CURL=ON
+                -DLLAMA_CURL=OFF
                 ${COMMON_GGML_ARGS}
             BUILD_BYPRODUCTS
                 ${_ll_bin}/bin/llama-server${EVA_EXE_SUFFIX}
@@ -166,3 +169,50 @@ endif()
 add_custom_target(eva-sync ALL
     COMMAND ${CMAKE_COMMAND} -E echo "EVA backend planned under ${EVA_BACKEND_ROOT}"
 )
+
+# Make ALL build depend on all ExternalProject targets
+set(_eva_all_deps)
+if (EVA_BUILD_LLAMA)
+    list(APPEND _eva_all_deps llama_cpu)
+    if (EVA_BUILD_CUDA AND EVA_HAS_CUDA)
+        list(APPEND _eva_all_deps llama_cuda)
+    endif()
+    if (EVA_BUILD_VULKAN AND EVA_HAS_VULKAN)
+        list(APPEND _eva_all_deps llama_vulkan)
+    endif()
+    if (EVA_BUILD_OPENCL AND EVA_HAS_OPENCL)
+        list(APPEND _eva_all_deps llama_opencl)
+    endif()
+endif()
+if (EVA_BUILD_WHISPER)
+    list(APPEND _eva_all_deps whisper_cpu)
+    if (EVA_BUILD_CUDA AND EVA_HAS_CUDA)
+        list(APPEND _eva_all_deps whisper_cuda)
+    endif()
+    if (EVA_BUILD_VULKAN AND EVA_HAS_VULKAN)
+        list(APPEND _eva_all_deps whisper_vulkan)
+    endif()
+    if (EVA_BUILD_OPENCL AND EVA_HAS_OPENCL)
+        list(APPEND _eva_all_deps whisper_opencl)
+    endif()
+endif()
+if (EVA_BUILD_SD)
+    list(APPEND _eva_all_deps sd_cpu)
+    if (EVA_BUILD_CUDA AND EVA_HAS_CUDA)
+        list(APPEND _eva_all_deps sd_cuda)
+    endif()
+    if (EVA_BUILD_VULKAN AND EVA_HAS_VULKAN)
+        list(APPEND _eva_all_deps sd_vulkan)
+    endif()
+    if (EVA_BUILD_OPENCL AND EVA_HAS_OPENCL)
+        list(APPEND _eva_all_deps sd_opencl)
+    endif()
+endif()
+if (_eva_all_deps)
+    add_dependencies(eva-sync ${_eva_all_deps})
+endif()
+
+get_property(_eva_targets GLOBAL PROPERTY EVA_EXTERNAL_TARGETS)
+if (_eva_targets)
+    add_dependencies(eva-sync ${_eva_targets})
+endif()
