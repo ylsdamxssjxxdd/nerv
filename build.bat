@@ -1,2 +1,6 @@
-cmake -B build/build-vulkan -DGGML_VULKAN=ON -DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DLLAMA_CURL=OFF
-cmake --build build --config Release -j24
+@echo off
+setlocal ENABLEDELAYEDEXPANSION
+REM Windows build wrapper. Delegates to PowerShell script with same args.
+set SCRIPT_DIR=%~dp0
+powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%build-win.ps1" %*
+endlocal
