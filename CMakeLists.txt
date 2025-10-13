@@ -56,9 +56,12 @@ function(eva_add_3rdparty_for_device DEVICE)
         -DBUILD_SHARED_LIBS=OFF
         -DGGML_STATIC=ON
         -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
-        -DGGML_NATIVE=OFF
         )
 
+        # Only disable GGML_NATIVE for CUDA to support multiple driver/toolkit versions
+        if (_dev STREQUAL "cuda")
+            list(APPEND COMMON_GGML_ARGS -DGGML_NATIVE=OFF)
+        endif()
     # Build llama.cpp (server/quantize/tts)
     if (EVA_BUILD_LLAMA)
         set(_ll_src ${CMAKE_SOURCE_DIR}/llama.cpp)
