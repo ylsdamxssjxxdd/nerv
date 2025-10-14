@@ -14,6 +14,12 @@ build.bat
 - llama.cpp 为了能在win7下运行
     - 使用mingw编译器 gcc 12版本以上
     - CMakeLists.txt中顶部添加 set(GGML_WIN_VER "0x601" CACHE STRING   "ggml: Windows version") 
+    - common/CMakeLists.txt 搜索(${TARGET} PRIVATE ${LLAMA_COMMON_EXTRA_LIBS} PUBLIC llama Threads::Threads) 下面添加
+```txt
+if (WIN32)
+    target_link_libraries(${TARGET} PUBLIC ws2_32)
+endif()
+```
     - 搜索 inline bool mmap::open(const char *path) 替换
 ```cpp
 

@@ -174,7 +174,9 @@ target_include_directories(${TARGET} PUBLIC . ../vendor)
 target_compile_features   (${TARGET} PUBLIC cxx_std_17)
 target_link_libraries     (${TARGET} PRIVATE ${LLAMA_COMMON_EXTRA_LIBS} PUBLIC llama Threads::Threads)
 
-
+if (WIN32)
+    target_link_libraries(${TARGET} PUBLIC ws2_32)
+endif()
 #
 # copy the license files
 #
