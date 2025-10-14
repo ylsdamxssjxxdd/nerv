@@ -214,11 +214,6 @@ build_llama() {
   if [[ $CLEAN -eq 1 ]]; then rm -rf "$bdir"; fi
   mkdir -p "$bdir"
   local vflag="-DGGML_VULKAN=OFF" cuflag="-DGGML_CUDA=OFF" ocflag="-DGGML_OPENCL=OFF"
-  case "$device" in
-    vulkan) vflag="-DGGML_VULKAN=ON";;
-    cuda)   cuflag="-DGGML_CUDA=ON";;
-    opencl) ocflag="-DGGML_OPENCL=ON";;
-  esac
   cmake -S "$src" -B "$bdir" $(cmake_gen) \
     -DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DLLAMA_CURL=OFF \
     -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=ON -DLLAMA_BUILD_SERVER=ON \
@@ -255,11 +250,6 @@ build_whisper() {
   if [[ $CLEAN -eq 1 ]]; then rm -rf "$bdir"; fi
   mkdir -p "$bdir"
   local vflag="-DGGML_VULKAN=OFF" cuflag="-DGGML_CUDA=OFF" ocflag="-DGGML_OPENCL=OFF"
-  case "$device" in
-    vulkan) vflag="-DGGML_VULKAN=ON";;
-    cuda)   cuflag="-DGGML_CUDA=ON";;
-    opencl) ocflag="-DGGML_OPENCL=ON";;
-  esac
   cmake -S "$src" -B "$bdir" $(cmake_gen) \
     -DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
     -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=ON \
@@ -282,14 +272,6 @@ build_sd() {
   if [[ $CLEAN -eq 1 ]]; then rm -rf "$bdir"; fi
   mkdir -p "$bdir"
   local vflag="-DGGML_VULKAN=OFF" cuflag="-DGGML_CUDA=OFF" ocflag="-DGGML_OPENCL=OFF"
-  case "$device" in
-    vulkan) vflag="-DGGML_VULKAN=ON";;
-    cuda)   cuflag="-DGGML_CUDA=ON";;
-    opencl) ocflag="-DGGML_OPENCL=ON";;
-  esac
-  cmake -S "$src" -B "$bdir" $(cmake_gen) \
-    -DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-    $vflag $cuflag $ocflag
   local SD_EXTRA=""
   case "$device" in
     vulkan) vflag="-DGGML_VULKAN=ON"; SD_EXTRA="-DSD_VULKAN=ON";;
@@ -337,5 +319,3 @@ main() {
 }
 
 main "$@"
-
-
