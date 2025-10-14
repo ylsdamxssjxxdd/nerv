@@ -184,7 +184,7 @@ function Build-Llama([string]$device,[string]$arch) {
   $defs = @('-D', 'LLAMA_CURL=OFF', '-D', 'LLAMA_BUILD_TESTS=OFF', '-D', 'LLAMA_BUILD_EXAMPLES=ON', '-D', 'LLAMA_BUILD_SERVER=ON')
   switch ($device) {
     'vulkan' {  $defs += @('-D','GGML_VULKAN=ON','-D','SD_VULKAN=ON') }
-    'cuda'   {  $defs += @('-D','GGML_CUDA=ON','-D','SD_CUDA=ON') }
+    'cuda'   {  $defs += @('-D','GGML_CUDA=ON','-D','SD_CUDA=ON','-D','GGML_NATIVE=OFF') }
     'opencl' {  $defs += @('-D','GGML_OPENCL=ON','-D','SD_OPENCL=ON') }
     default  { $defs += @('-D','GGML_VULKAN=OFF','-D','GGML_CUDA=OFF','-D','GGML_OPENCL=OFF') }
   }
@@ -209,7 +209,7 @@ function Build-Whisper([string]$device,[string]$arch) {
   $defs = @('-D','WHISPER_BUILD_TESTS=OFF','-D','WHISPER_BUILD_EXAMPLES=ON')
   switch ($device) {
     'vulkan' {  $defs += @('-D','GGML_VULKAN=ON','-D','SD_VULKAN=ON') }
-    'cuda'   {  $defs += @('-D','GGML_CUDA=ON','-D','SD_CUDA=ON') }
+    'cuda'   {  $defs += @('-D','GGML_CUDA=ON','-D','SD_CUDA=ON','-D','GGML_NATIVE=OFF') }
     'opencl' {  $defs += @('-D','GGML_OPENCL=ON','-D','SD_OPENCL=ON') }
     default  { $defs += @('-D','GGML_VULKAN=OFF','-D','GGML_CUDA=OFF','-D','GGML_OPENCL=OFF') }
   }
@@ -229,7 +229,7 @@ function Build-SD([string]$device,[string]$arch) {
   $defs = @()
   switch ($device) {
     'vulkan' {  $defs += @('-D','GGML_VULKAN=ON','-D','SD_VULKAN=ON') }
-    'cuda'   {  $defs += @('-D','GGML_CUDA=ON','-D','SD_CUDA=ON') }
+    'cuda'   {  $defs += @('-D','GGML_CUDA=ON','-D','SD_CUDA=ON','-D','GGML_NATIVE=OFF') }
     'opencl' {  $defs += @('-D','GGML_OPENCL=ON','-D','SD_OPENCL=ON') }
     default  { $defs += @('-D','GGML_VULKAN=OFF','-D','GGML_CUDA=OFF','-D','GGML_OPENCL=OFF') }
   }

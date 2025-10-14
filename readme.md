@@ -7,7 +7,8 @@
 - 补完
 
 ## 编译
-运行脚本
+build.bat 
+默认只会编译cpu和vulkan版本，-Devices all 为所有版本
 
 ## 更新后端时注意
 - stable-diffusion.cpp 搜索 LOG_DEBUG("Using Vulkan backend");替换为如下代码

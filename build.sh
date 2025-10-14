@@ -214,10 +214,11 @@ build_llama() {
   if [[ $CLEAN -eq 1 ]]; then rm -rf "$bdir"; fi
   mkdir -p "$bdir"
   local vflag="-DGGML_VULKAN=OFF" cuflag="-DGGML_CUDA=OFF" ocflag="-DGGML_OPENCL=OFF"
+  local NATIVE_EXTRA=""; if [[ "$device" == "cuda" ]]; then NATIVE_EXTRA="-DGGML_NATIVE=OFF"; fi
   cmake -S "$src" -B "$bdir" $(cmake_gen) \
     -DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DLLAMA_CURL=OFF \
     -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=ON -DLLAMA_BUILD_SERVER=ON \
-    $vflag $cuflag $ocflag -DCMAKE_BUILD_TYPE=Release
+    $vflag $cuflag $ocflag $NATIVE_EXTRA -DCMAKE_BUILD_TYPE=Release
   # Determine available targets and build only those
   local help_out
   help_out=$(cmake --build "$bdir" --config Release --target help 2>/dev/null || true)
@@ -250,10 +251,11 @@ build_whisper() {
   if [[ $CLEAN -eq 1 ]]; then rm -rf "$bdir"; fi
   mkdir -p "$bdir"
   local vflag="-DGGML_VULKAN=OFF" cuflag="-DGGML_CUDA=OFF" ocflag="-DGGML_OPENCL=OFF"
+  local NATIVE_EXTRA=""; if [[ "$device" == "cuda" ]]; then NATIVE_EXTRA="-DGGML_NATIVE=OFF"; fi
   cmake -S "$src" -B "$bdir" $(cmake_gen) \
     -DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
     -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=ON \
-    $vflag $cuflag $ocflag -DCMAKE_BUILD_TYPE=Release
+    $vflag $cuflag $ocflag $NATIVE_EXTRA -DCMAKE_BUILD_TYPE=Release
   cmake --build "$bdir" $(cmake_jobs_flag) --config Release --target whisper-cli
   local out="$OUT_DIR/$arch/$os/$device/whisper.cpp"
   copy_bin "$bdir" whisper-cli "$out" "$exe_suf" || true
@@ -273,14 +275,15 @@ build_sd() {
   mkdir -p "$bdir"
   local vflag="-DGGML_VULKAN=OFF" cuflag="-DGGML_CUDA=OFF" ocflag="-DGGML_OPENCL=OFF"
   local SD_EXTRA=""
+  local NATIVE_EXTRA=""
   case "$device" in
     vulkan) vflag="-DGGML_VULKAN=ON"; SD_EXTRA="-DSD_VULKAN=ON";;
-    cuda)   cuflag="-DGGML_CUDA=ON";   SD_EXTRA="-DSD_CUDA=ON";;
+    cuda)   cuflag="-DGGML_CUDA=ON";   SD_EXTRA="-DSD_CUDA=ON"; NATIVE_EXTRA="-DGGML_NATIVE=OFF";;
     opencl) ocflag="-DGGML_OPENCL=ON"; SD_EXTRA="-DSD_OPENCL=ON";;
   esac
   cmake -S "$src" -B "$bdir" $(cmake_gen) \
     -DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-    $vflag $cuflag $ocflag $SD_EXTRA -DCMAKE_BUILD_TYPE=Release
+    $vflag $cuflag $ocflag $SD_EXTRA $NATIVE_EXTRA -DCMAKE_BUILD_TYPE=Release
   cmake --build "$bdir" $(cmake_jobs_flag) --config Release --target sd
   local out="$OUT_DIR/$arch/$os/$device/stable-diffusion.cpp"
   copy_bin "$bdir" sd "$out" "$exe_suf" || true
@@ -319,3 +322,5 @@ main() {
 }
 
 main "$@"
+
+
