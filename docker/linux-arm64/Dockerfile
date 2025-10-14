@@ -83,6 +83,21 @@ ENV LD_LIBRARY_PATH=/distribution/opencv-4.10.0-arm-install/lib:$LD_LIBRARY_PATH
 ENV PATH=/distribution/patchelf-0.18.0-aarch64/bin:$PATH
 
 # 真正安装vulkan
+# Install a modern Vulkan-Headers so vulkan.hpp has enhanced-mode features
+# Install a modern Vulkan-Headers so vulkan.hpp has enhanced-mode features
+ARG VULKAN_HEADERS_REF=
+RUN set -eux; \
+    apt-get update && apt-get install -y --no-install-recommends ca-certificates git cmake ninja-build && rm -rf /var/lib/apt/lists/*; \
+    git clone --depth 1 https://github.com/KhronosGroup/Vulkan-Headers.git /tmp/Vulkan-Headers; \
+    if [ -n "$VULKAN_HEADERS_REF" ]; then \
+      git -C /tmp/Vulkan-Headers fetch --depth 1 origin "$VULKAN_HEADERS_REF" || git -C /tmp/Vulkan-Headers fetch --depth 1 origin "refs/tags/$VULKAN_HEADERS_REF"; \
+      git -C /tmp/Vulkan-Headers checkout -q FETCH_HEAD || true; \
+    fi; \
+    cmake -GNinja -B /tmp/vkh-build -S /tmp/Vulkan-Headers -DCMAKE_BUILD_TYPE=Release; \
+    ninja -C /tmp/vkh-build install; \
+    rm -rf /tmp/Vulkan-Headers /tmp/vkh-build; \
+    ldconfig
+
 RUN set -eux; \
     git clone --depth 1 --branch v2024.1 https://github.com/google/shaderc.git /tmp/shaderc \
     && cd /tmp/shaderc \
