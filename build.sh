@@ -214,7 +214,12 @@ build_llama() {
   if [[ $CLEAN -eq 1 ]]; then rm -rf "$bdir"; fi
   mkdir -p "$bdir"
   local vflag="-DGGML_VULKAN=OFF" cuflag="-DGGML_CUDA=OFF" ocflag="-DGGML_OPENCL=OFF"
-  local NATIVE_EXTRA=""; if [[ "$device" == "cuda" ]]; then NATIVE_EXTRA="-DGGML_NATIVE=OFF"; fi
+  local NATIVE_EXTRA=""
+  case "$device" in
+    vulkan) vflag="-DGGML_VULKAN=ON" ;;
+    cuda)   cuflag="-DGGML_CUDA=ON"; NATIVE_EXTRA="-DGGML_NATIVE=OFF" ;;
+    opencl) ocflag="-DGGML_OPENCL=ON" ;;
+  esac
   cmake -S "$src" -B "$bdir" $(cmake_gen) \
     -DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DLLAMA_CURL=OFF \
     -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=ON -DLLAMA_BUILD_SERVER=ON \
@@ -251,7 +256,12 @@ build_whisper() {
   if [[ $CLEAN -eq 1 ]]; then rm -rf "$bdir"; fi
   mkdir -p "$bdir"
   local vflag="-DGGML_VULKAN=OFF" cuflag="-DGGML_CUDA=OFF" ocflag="-DGGML_OPENCL=OFF"
-  local NATIVE_EXTRA=""; if [[ "$device" == "cuda" ]]; then NATIVE_EXTRA="-DGGML_NATIVE=OFF"; fi
+  local NATIVE_EXTRA=""
+  case "$device" in
+    vulkan) vflag="-DGGML_VULKAN=ON" ;;
+    cuda)   cuflag="-DGGML_CUDA=ON"; NATIVE_EXTRA="-DGGML_NATIVE=OFF" ;;
+    opencl) ocflag="-DGGML_OPENCL=ON" ;;
+  esac
   cmake -S "$src" -B "$bdir" $(cmake_gen) \
     -DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
     -DWHISPER_BUILD_TESTS=OFF -DWHISPER_BUILD_EXAMPLES=ON \
