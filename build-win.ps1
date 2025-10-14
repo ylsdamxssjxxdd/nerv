@@ -36,7 +36,13 @@ function Test-Cmd([string]$name) { return [bool](Get-Command $name -ErrorAction 
 function Can-Vulkan {
   if ($env:VULKAN_SDK) { return $true }
   if (Test-Cmd 'glslc') { return $true }
-  try { reg query 'HKLM\SOFTWARE\Khronos\Vulkan\Drivers' | Out-Null; return $true } catch {}
+  $vkInc = Join-Path ${env:ProgramFiles} 'VulkanSDK'
+  try {
+    if (Test-Path $vkInc) {
+      $hit = Get-ChildItem -Path $vkInc -Recurse -ErrorAction SilentlyContinue -Filter 'vulkan.h' | Select-Object -First 1
+      if ($hit) { return $true }
+    }
+  } catch {}
   return $false
 }
 
@@ -126,14 +132,14 @@ function Invoke-CMakeBuild([string]$bdir,[string[]]$targets) {
 
 function Copy-Binary([string]$bdir,[string]$tgt,[string]$outdir) {
   New-Item -ItemType Directory -Force -Path $outdir | Out-Null
-  $candidates = @(
-    Join-Path $bdir ("$tgt.exe"),
-    Join-Path (Join-Path $bdir 'bin') ("$tgt.exe"),
-    Join-Path (Join-Path $bdir 'Release') ("$tgt.exe"),
-    Join-Path (Join-Path (Join-Path $bdir 'bin') 'Release') ("$tgt.exe"),
-    Join-Path $bdir $tgt,
-    Join-Path (Join-Path $bdir 'bin') $tgt
-  )
+  $exe = "$tgt.exe"
+  $candidates = @()
+  $candidates += (Join-Path $bdir $exe)
+  $candidates += (Join-Path (Join-Path $bdir 'bin') $exe)
+  $candidates += (Join-Path (Join-Path $bdir 'Release') $exe)
+  $candidates += (Join-Path (Join-Path (Join-Path $bdir 'bin') 'Release') $exe)
+  $candidates += (Join-Path $bdir $tgt)
+  $candidates += (Join-Path (Join-Path $bdir 'bin') $tgt)
   foreach ($c in $candidates) {
     if (Test-Path $c) { Copy-Item $c -Destination $outdir -Force; Write-Host "Copied $(Split-Path $c -Leaf) -> $outdir"; return }
   }
@@ -143,6 +149,31 @@ function Copy-Binary([string]$bdir,[string]$tgt,[string]$outdir) {
 function Get-AvailableTargets([string]$bdir) {
   try { return ((& cmake --build $bdir --config Release --target help) -join "`n") } catch { return '' }
 }
+function Assert-BackendEnabled([string]$bdir,[string]$device,[string]$project) {
+  $cache = Join-Path $bdir 'CMakeCache.txt'
+  if (-not (Test-Path $cache)) { return }
+  $txt = Get-Content -Raw -LiteralPath $cache
+  switch ($device) {
+    'vulkan' {
+      if ($txt -notmatch 'GGML_VULKAN:BOOL=ON|GGML_VULKAN:BOOL=TRUE') {
+        Write-Warning "$project [$device]: GGML_VULKAN not enabled by CMake; falling back to CPU. Ensure Vulkan SDK installed and VULKAN_SDK is set."
+      } elseif ($txt -notmatch 'Vulkan_FOUND:INTERNAL=1|Vulkan_FOUND:BOOL=TRUE') {
+        Write-Warning "$project [$device]: Vulkan not found (Vulkan_FOUND=FALSE); check VULKAN_SDK and build environment."
+      }
+    }
+    'cuda' {
+      if ($txt -notmatch 'GGML_CUDA:BOOL=ON|GGML_CUDA:BOOL=TRUE') {
+        Write-Warning "$project [$device]: GGML_CUDA not enabled; check CUDA toolkit and CMake logs."
+      }
+    }
+    'opencl' {
+      if ($txt -notmatch 'GGML_OPENCL:BOOL=ON|GGML_OPENCL:BOOL=TRUE') {
+        Write-Warning "$project [$device]: GGML_OPENCL not enabled; ensure OpenCL headers/libs available."
+      }
+    }
+  }
+}
+
 
 function Build-Llama([string]$device,[string]$arch) {
   $src = Resolve-Src 'llama.cpp' $LlamaSrc 'LLAMA_SRC' @((Join-Path $ROOT 'llama.cpp'), (Join-Path $EXTERN 'llama.cpp'))
@@ -159,6 +190,7 @@ function Build-Llama([string]$device,[string]$arch) {
   }
   $gen = Get-Generator $arch
   Invoke-CMakeConfigure $src $bdir $gen $defs
+  if ($device -in @('vulkan','cuda','opencl')) { Assert-BackendEnabled $bdir $device 'llama.cpp' }
   $help = Get-AvailableTargets $bdir
   $targets = @()
   foreach ($t in @('llama-server','llama-quantize','llama-tts')) { if ($help -match [regex]::Escape($t)) { $targets += $t } }
@@ -168,7 +200,6 @@ function Build-Llama([string]$device,[string]$arch) {
   Copy-Binary $bdir 'llama-quantize' $out
   Copy-Binary $bdir 'llama-tts' $out
 }
-
 function Build-Whisper([string]$device,[string]$arch) {
   $src = Resolve-Src 'whisper.cpp' $WhisperSrc 'WHISPER_SRC' @((Join-Path $ROOT 'whisper.cpp'), (Join-Path $EXTERN 'whisper.cpp'))
   if (-not $src) { throw "whisper.cpp source not found. Provide -WhisperSrc or set WHISPER_SRC or place repo at .\whisper.cpp or .\external\whisper.cpp." }
@@ -184,11 +215,11 @@ function Build-Whisper([string]$device,[string]$arch) {
   }
   $gen = Get-Generator $arch
   Invoke-CMakeConfigure $src $bdir $gen $defs
+  if ($device -in @('vulkan','cuda','opencl')) { Assert-BackendEnabled $bdir $device 'whisper.cpp' }
   Invoke-CMakeBuild $bdir @('whisper-cli')
   $out = Join-Path (Join-Path (Join-Path (Join-Path $OUT $arch) $OS_ID) $device) 'whisper.cpp'
   Copy-Binary $bdir 'whisper-cli' $out
 }
-
 function Build-SD([string]$device,[string]$arch) {
   $src = Resolve-Src 'stable-diffusion.cpp' $SDSrc 'SD_SRC' @((Join-Path $ROOT 'stable-diffusion.cpp'), (Join-Path $EXTERN 'stable-diffusion.cpp'))
   if (-not $src) { throw "stable-diffusion.cpp source not found. Provide -SDSrc or set SD_SRC or place repo at .\stable-diffusion.cpp or .\external\stable-diffusion.cpp." }
@@ -204,11 +235,11 @@ function Build-SD([string]$device,[string]$arch) {
   }
   $gen = Get-Generator $arch
   Invoke-CMakeConfigure $src $bdir $gen $defs
+  if ($device -in @('vulkan','cuda','opencl')) { Assert-BackendEnabled $bdir $device 'stable-diffusion.cpp' }
   Invoke-CMakeBuild $bdir @('sd')
   $out = Join-Path (Join-Path (Join-Path (Join-Path $OUT $arch) $OS_ID) $device) 'stable-diffusion.cpp'
   Copy-Binary $bdir 'sd' $out
 }
-
 $arch = Resolve-Arch
 $devs = Resolve-Devices $Devices
 if ($Projects -eq 'all') { $projs = @('llama','whisper','sd') } else { $projs = $Projects.Split(',') }
@@ -227,3 +258,9 @@ foreach ($d in $devs) {
 }
 
 Write-Host "Done. Artifacts under: $OUT\$arch\$OS_ID"
+
+
+
+
+
+

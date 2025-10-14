@@ -289,7 +289,16 @@ build_sd() {
   esac
   cmake -S "$src" -B "$bdir" $(cmake_gen) \
     -DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-    $vflag $cuflag $ocflag -DCMAKE_BUILD_TYPE=Release
+    $vflag $cuflag $ocflag
+  local SD_EXTRA=""
+  case "$device" in
+    vulkan) vflag="-DGGML_VULKAN=ON"; SD_EXTRA="-DSD_VULKAN=ON";;
+    cuda)   cuflag="-DGGML_CUDA=ON";   SD_EXTRA="-DSD_CUDA=ON";;
+    opencl) ocflag="-DGGML_OPENCL=ON"; SD_EXTRA="-DSD_OPENCL=ON";;
+  esac
+  cmake -S "$src" -B "$bdir" $(cmake_gen) \
+    -DBUILD_SHARED_LIBS=OFF -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+    $vflag $cuflag $ocflag $SD_EXTRA -DCMAKE_BUILD_TYPE=Release
   cmake --build "$bdir" $(cmake_jobs_flag) --config Release --target sd
   local out="$OUT_DIR/$arch/$os/$device/stable-diffusion.cpp"
   copy_bin "$bdir" sd "$out" "$exe_suf" || true
@@ -328,3 +337,5 @@ main() {
 }
 
 main "$@"
+
+
