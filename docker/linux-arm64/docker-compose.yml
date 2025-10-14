@@ -12,7 +12,6 @@ services:
       - "7759:7759"           # 开放端口
     volumes:
       - ./workspace:/workspace  # 工作目录
-      - ./distribution:/distribution  # 预编译好的库目录
     stdin_open: true          # 保持 STDIN 开放
     tty: true                 # 分配伪终端
     # restart: unless-stopped # 总是重启，除非手动停止

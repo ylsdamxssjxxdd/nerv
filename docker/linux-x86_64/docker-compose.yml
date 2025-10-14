@@ -6,27 +6,26 @@ services:
     privileged: true # 特权模式
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile-cuda
     ports:
-      - "7758:7758"           # sse端口
+      - "7751:7751"           # sse端口
     volumes:
       - ./workspace:/workspace  # 工作目录
       - ./distribution:/distribution  # 预编译好的库目录 
-      - ./workspace:/workspace  # 工作目录
       # - ../../../echo-vnet:/workspace  # 工作目录
     stdin_open: true          # 保持 STDIN 开放
     tty: true                 # 分配伪终端
-    gpus: all
-    environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    # gpus: all
+    # environment:
+    #   - NVIDIA_VISIBLE_DEVICES=all
+    #   - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
     # restart: unless-stopped # 总是重启，除非手动停止
     command: jupyter lab --ServerApp.ip="*" --ServerApp.password="" --ServerApp.token="" --no-browser --allow-root --port 7758
 

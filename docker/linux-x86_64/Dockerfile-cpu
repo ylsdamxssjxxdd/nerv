@@ -75,12 +75,11 @@ RUN npm install -g @qwen-code/qwen-code
 COPY ./distribution /distribution
 
 # 设置环境变量
-ENV PATH=/distribution/Qt5.15.17-ubuntu20_04-arm64/bin:$PATH
-ENV LD_LIBRARY_PATH=/distribution/Qt5.15.17-ubuntu20_04-arm64/lib:$LD_LIBRARY_PATH
-ENV PATH=/distribution/cmake-3.31.7-linux-aarch64/bin:$PATH
-ENV PATH=/distribution/opencv-4.10.0-arm-install/bin:$PATH
-ENV LD_LIBRARY_PATH=/distribution/opencv-4.10.0-arm-install/lib:$LD_LIBRARY_PATH
-ENV PATH=/distribution/patchelf-0.18.0-aarch64/bin:$PATH
+ENV PATH=/distribution/Qt5.15.17-ubuntu20_04-amd64/bin:$PATH
+ENV LD_LIBRARY_PATH=/distribution/Qt5.15.17-ubuntu20_04-amd64/lib:$LD_LIBRARY_PATH
+ENV PATH=/distribution/cmake-3.31.7-linux-x86_64/bin:$PATH
+ENV PATH=/distribution/opencv-4.10.0-x86-install/bin:$PATH
+ENV LD_LIBRARY_PATH=/distribution/opencv-4.10.0-x86-install/lib:$LD_LIBRARY_PATH
 
 # 真正安装vulkan
 RUN set -eux; \
@@ -103,7 +102,6 @@ ENV Vulkan_GLSLC_EXECUTABLE=/usr/local/bin/glslc
 # 加载环境变量
 ENV PATH=/opt/vulkan-sdk/bin:$PATH
 ENV LD_LIBRARY_PATH=/opt/vulkan-sdk/lib:$LD_LIBRARY_PATH
-
 
 # 设置工作目录
 WORKDIR /workspace
