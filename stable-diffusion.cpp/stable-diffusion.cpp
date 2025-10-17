@@ -288,6 +288,13 @@ public:
             }
         }
 
+        if (strlen(SAFE_STR(sd_ctx_params->qwen2vl_vision_path)) > 0) {
+            LOG_INFO("loading qwen2vl vision from '%s'", sd_ctx_params->qwen2vl_vision_path);
+            if (!model_loader.init_from_file(sd_ctx_params->qwen2vl_vision_path, "text_encoders.qwen2vl.visual.")) {
+                LOG_WARN("loading qwen2vl vision from '%s' failed", sd_ctx_params->qwen2vl_vision_path);
+            }
+        }
+
         if (strlen(SAFE_STR(sd_ctx_params->vae_path)) > 0) {
             LOG_INFO("loading vae from '%s'", sd_ctx_params->vae_path);
             if (!model_loader.init_from_file(sd_ctx_params->vae_path, "vae.")) {
@@ -299,6 +306,15 @@ public:
         if (version == VERSION_COUNT) {
             LOG_ERROR("get sd version from file failed: '%s'", SAFE_STR(sd_ctx_params->model_path));
             return false;
+        }
+
+        auto& tensor_types = model_loader.tensor_storages_types;
+        for (auto& item : tensor_types) {
+            // LOG_DEBUG("%s %u", item.first.c_str(), item.second);
+            if (contains(item.first, "qwen2vl") && ends_with(item.first, "weight") && (item.second == GGML_TYPE_F32 || item.second == GGML_TYPE_BF16)) {
+                item.second = GGML_TYPE_F16;
+                // LOG_DEBUG(" change %s %u", item.first.c_str(), item.second);
+            }
         }
 
         LOG_INFO("Version: %s ", model_version_to_str[version]);
@@ -341,13 +357,6 @@ public:
 
         if (sd_version_is_sdxl(version)) {
             scale_factor = 0.13025f;
-            if (strlen(SAFE_STR(sd_ctx_params->vae_path)) == 0 && strlen(SAFE_STR(sd_ctx_params->taesd_path)) == 0) {
-                LOG_WARN(
-                    "!!!It looks like you are using SDXL model. "
-                    "If you find that the generated images are completely black, "
-                    "try specifying SDXL VAE FP16 Fix with the --vae parameter. "
-                    "You can find it here: https://huggingface.co/madebyollin/sdxl-vae-fp16-fix/blob/main/sdxl_vae.safetensors");
-            }
         } else if (sd_version_is_sd3(version)) {
             scale_factor = 1.5305f;
         } else if (sd_version_is_flux(version)) {
@@ -444,9 +453,15 @@ public:
                     clip_vision->get_param_tensors(tensors);
                 }
             } else if (sd_version_is_qwen_image(version)) {
+                bool enable_vision = false;
+                if (!vae_decode_only) {
+                    enable_vision = true;
+                }
                 cond_stage_model = std::make_shared<Qwen2_5_VLCLIPEmbedder>(clip_backend,
                                                                             offload_params_to_cpu,
-                                                                            model_loader.tensor_storages_types);
+                                                                            model_loader.tensor_storages_types,
+                                                                            "",
+                                                                            enable_vision);
                 diffusion_model  = std::make_shared<QwenImageModel>(backend,
                                                                    offload_params_to_cpu,
                                                                    model_loader.tensor_storages_types,
@@ -521,6 +536,15 @@ public:
                 if (sd_ctx_params->vae_conv_direct) {
                     LOG_INFO("Using Conv2d direct in the vae model");
                     first_stage_model->enable_conv2d_direct();
+                }
+                if (version == VERSION_SDXL &&
+                    (strlen(SAFE_STR(sd_ctx_params->vae_path)) == 0 || sd_ctx_params->force_sdxl_vae_conv_scale)) {
+                    float vae_conv_2d_scale = 1.f / 32.f;
+                    LOG_WARN(
+                        "No VAE specified with --vae or --force-sdxl-vae-conv-scale flag set, "
+                        "using Conv2D scale %.3f",
+                        vae_conv_2d_scale);
+                    first_stage_model->set_conv2d_scale(vae_conv_2d_scale);
                 }
                 first_stage_model->alloc_params_buffer();
                 first_stage_model->get_param_tensors(tensors, "first_stage_model");
@@ -617,7 +641,9 @@ public:
 
         if (vae_decode_only) {
             ignore_tensors.insert("first_stage_model.encoder");
+            ignore_tensors.insert("first_stage_model.conv1");
             ignore_tensors.insert("first_stage_model.quant");
+            ignore_tensors.insert("text_encoders.qwen2vl.visual.");
         }
         if (version == VERSION_SVD) {
             ignore_tensors.insert("conditioner.embedders.3");
@@ -703,64 +729,102 @@ public:
                 ggml_backend_is_cpu(clip_backend) ? "RAM" : "VRAM");
         }
 
-        // check is_using_v_parameterization_for_sd2
-        if (sd_version_is_sd2(version)) {
-            if (is_using_v_parameterization_for_sd2(ctx, sd_version_is_inpaint(version))) {
-                is_using_v_parameterization = true;
-            }
-        } else if (sd_version_is_sdxl(version)) {
-            if (model_loader.tensor_storages_types.find("edm_vpred.sigma_max") != model_loader.tensor_storages_types.end()) {
-                // CosXL models
-                // TODO: get sigma_min and sigma_max values from file
-                is_using_edm_v_parameterization = true;
-            }
-            if (model_loader.tensor_storages_types.find("v_pred") != model_loader.tensor_storages_types.end()) {
-                is_using_v_parameterization = true;
-            }
-        } else if (version == VERSION_SVD) {
-            // TODO: V_PREDICTION_EDM
-            is_using_v_parameterization = true;
-        }
-
-        if (sd_version_is_sd3(version)) {
-            LOG_INFO("running in FLOW mode");
-            float shift = sd_ctx_params->flow_shift;
-            if (shift == INFINITY) {
-                shift = 3.0;
-            }
-            denoiser = std::make_shared<DiscreteFlowDenoiser>(shift);
-        } else if (sd_version_is_flux(version)) {
-            LOG_INFO("running in Flux FLOW mode");
-            float shift = 1.0f;  // TODO: validate
-            for (auto pair : model_loader.tensor_storages_types) {
-                if (pair.first.find("model.diffusion_model.guidance_in.in_layer.weight") != std::string::npos) {
-                    shift = 1.15f;
+        if (sd_ctx_params->prediction != DEFAULT_PRED) {
+            switch (sd_ctx_params->prediction) {
+                case EPS_PRED:
+                    LOG_INFO("running in eps-prediction mode");
+                    break;
+                case V_PRED:
+                    LOG_INFO("running in v-prediction mode");
+                    denoiser = std::make_shared<CompVisVDenoiser>();
+                    break;
+                case EDM_V_PRED:
+                    LOG_INFO("running in v-prediction EDM mode");
+                    denoiser = std::make_shared<EDMVDenoiser>();
+                    break;
+                case SD3_FLOW_PRED: {
+                    LOG_INFO("running in FLOW mode");
+                    float shift = sd_ctx_params->flow_shift;
+                    if (shift == INFINITY) {
+                        shift = 3.0;
+                    }
+                    denoiser = std::make_shared<DiscreteFlowDenoiser>(shift);
                     break;
                 }
+                case FLUX_FLOW_PRED: {
+                    LOG_INFO("running in Flux FLOW mode");
+                    float shift = sd_ctx_params->flow_shift;
+                    if (shift == INFINITY) {
+                        shift = 3.0;
+                    }
+                    denoiser = std::make_shared<FluxFlowDenoiser>(shift);
+                    break;
+                }
+                default: {
+                    LOG_ERROR("Unknown parametrization %i", sd_ctx_params->prediction);
+                    return false;
+                }
             }
-            denoiser = std::make_shared<FluxFlowDenoiser>(shift);
-        } else if (sd_version_is_wan(version)) {
-            LOG_INFO("running in FLOW mode");
-            float shift = sd_ctx_params->flow_shift;
-            if (shift == INFINITY) {
-                shift = 5.0;
-            }
-            denoiser = std::make_shared<DiscreteFlowDenoiser>(shift);
-        } else if (sd_version_is_qwen_image(version)) {
-            LOG_INFO("running in FLOW mode");
-            float shift = sd_ctx_params->flow_shift;
-            if (shift == INFINITY) {
-                shift = 3.0;
-            }
-            denoiser = std::make_shared<DiscreteFlowDenoiser>(shift);
-        } else if (is_using_v_parameterization) {
-            LOG_INFO("running in v-prediction mode");
-            denoiser = std::make_shared<CompVisVDenoiser>();
-        } else if (is_using_edm_v_parameterization) {
-            LOG_INFO("running in v-prediction EDM mode");
-            denoiser = std::make_shared<EDMVDenoiser>();
         } else {
-            LOG_INFO("running in eps-prediction mode");
+            if (sd_version_is_sd2(version)) {
+                // check is_using_v_parameterization_for_sd2
+                if (is_using_v_parameterization_for_sd2(ctx, sd_version_is_inpaint(version))) {
+                    is_using_v_parameterization = true;
+                }
+            } else if (sd_version_is_sdxl(version)) {
+                if (model_loader.tensor_storages_types.find("edm_vpred.sigma_max") != model_loader.tensor_storages_types.end()) {
+                    // CosXL models
+                    // TODO: get sigma_min and sigma_max values from file
+                    is_using_edm_v_parameterization = true;
+                }
+                if (model_loader.tensor_storages_types.find("v_pred") != model_loader.tensor_storages_types.end()) {
+                    is_using_v_parameterization = true;
+                }
+            } else if (version == VERSION_SVD) {
+                // TODO: V_PREDICTION_EDM
+                is_using_v_parameterization = true;
+            }
+
+            if (sd_version_is_sd3(version)) {
+                LOG_INFO("running in FLOW mode");
+                float shift = sd_ctx_params->flow_shift;
+                if (shift == INFINITY) {
+                    shift = 3.0;
+                }
+                denoiser = std::make_shared<DiscreteFlowDenoiser>(shift);
+            } else if (sd_version_is_flux(version)) {
+                LOG_INFO("running in Flux FLOW mode");
+                float shift = 1.0f;  // TODO: validate
+                for (auto pair : model_loader.tensor_storages_types) {
+                    if (pair.first.find("model.diffusion_model.guidance_in.in_layer.weight") != std::string::npos) {
+                        shift = 1.15f;
+                        break;
+                    }
+                }
+                denoiser = std::make_shared<FluxFlowDenoiser>(shift);
+            } else if (sd_version_is_wan(version)) {
+                LOG_INFO("running in FLOW mode");
+                float shift = sd_ctx_params->flow_shift;
+                if (shift == INFINITY) {
+                    shift = 5.0;
+                }
+                denoiser = std::make_shared<DiscreteFlowDenoiser>(shift);
+            } else if (sd_version_is_qwen_image(version)) {
+                LOG_INFO("running in FLOW mode");
+                float shift = sd_ctx_params->flow_shift;
+                if (shift == INFINITY) {
+                    shift = 3.0;
+                }
+                denoiser = std::make_shared<DiscreteFlowDenoiser>(shift);
+            } else if (is_using_v_parameterization) {
+                LOG_INFO("running in v-prediction mode");
+                denoiser = std::make_shared<CompVisVDenoiser>();
+            } else if (is_using_edm_v_parameterization) {
+                LOG_INFO("running in v-prediction EDM mode");
+                denoiser = std::make_shared<EDMVDenoiser>();
+            } else {
+                LOG_INFO("running in eps-prediction mode");
+            }
         }
 
         auto comp_vis_denoiser = std::dynamic_pointer_cast<CompVisDenoiser>(denoiser);
@@ -976,12 +1040,12 @@ public:
             ggml_set_f32(output, 0.f);
         } else {
             sd_image_f32_t image         = sd_image_t_to_sd_image_f32_t(init_image);
-            sd_image_f32_t resized_image = clip_preprocess(image, clip_vision->vision_model.image_size);
+            sd_image_f32_t resized_image = clip_preprocess(image, clip_vision->vision_model.image_size, clip_vision->vision_model.image_size);
             free(image.data);
             image.data = NULL;
 
             ggml_tensor* pixel_values = ggml_new_tensor_4d(work_ctx, GGML_TYPE_F32, resized_image.width, resized_image.height, 3, 1);
-            sd_image_f32_to_tensor(resized_image.data, pixel_values, false);
+            sd_image_f32_to_tensor(resized_image, pixel_values, false);
             free(resized_image.data);
             resized_image.data = NULL;
 
@@ -1018,7 +1082,7 @@ public:
                     sd_image_f32_t resized_image = resize_sd_image_f32_t(image, width, height);
                     free(image.data);
                     image.data = NULL;
-                    sd_image_f32_to_tensor(resized_image.data, init_img, false);
+                    sd_image_f32_to_tensor(resized_image, init_img, false);
                     free(resized_image.data);
                     resized_image.data = NULL;
                 } else {
@@ -1157,11 +1221,12 @@ public:
         }
         struct ggml_tensor* denoised = ggml_dup_tensor(work_ctx, x);
 
+        int64_t t0 = ggml_time_us();
+
         auto denoise = [&](ggml_tensor* input, float sigma, int step) -> ggml_tensor* {
-            if (step == 1) {
+            if (step == 1 || step == -1) {
                 pretty_progress(0, (int)steps, 0);
             }
-            int64_t t0 = ggml_time_us();
 
             std::vector<float> scaling = denoiser->get_scalings(sigma);
             GGML_ASSERT(scaling.size() == 3);
@@ -1315,8 +1380,9 @@ public:
             }
 
             int64_t t1 = ggml_time_us();
-            if (step > 0) {
-                pretty_progress(step, (int)steps, (t1 - t0) / 1000000.f);
+            if (step > 0 || step == -(int)steps) {
+                int showstep = std::abs(step);
+                pretty_progress(showstep, (int)steps, (t1 - t0) / 1000000.f / showstep);
                 // LOG_INFO("step %d sampling completed taking %.2fs", step, (t1 - t0) * 1.0f / 1000000);
             }
             if (denoise_mask != nullptr) {
@@ -1461,7 +1527,7 @@ public:
             int ne3;
             if (sd_version_is_qwen_image(version)) {
                 ne2 = 1;
-                ne3 = C*x->ne[3];
+                ne3 = C * x->ne[3];
             } else {
                 if (!use_tiny_autoencoder) {
                     C *= 2;
@@ -1743,6 +1809,31 @@ enum scheduler_t str_to_schedule(const char* str) {
     return SCHEDULE_COUNT;
 }
 
+const char* prediction_to_str[] = {
+    "default",
+    "eps",
+    "v",
+    "edm_v",
+    "sd3_flow",
+    "flux_flow",
+};
+
+const char* sd_prediction_name(enum prediction_t prediction) {
+    if (prediction < PREDICTION_COUNT) {
+        return prediction_to_str[prediction];
+    }
+    return NONE_STR;
+}
+
+enum prediction_t str_to_prediction(const char* str) {
+    for (int i = 0; i < PREDICTION_COUNT; i++) {
+        if (!strcmp(str, prediction_to_str[i])) {
+            return (enum prediction_t)i;
+        }
+    }
+    return PREDICTION_COUNT;
+}
+
 void sd_ctx_params_init(sd_ctx_params_t* sd_ctx_params) {
     *sd_ctx_params                         = {};
     sd_ctx_params->vae_decode_only         = true;
@@ -1750,6 +1841,7 @@ void sd_ctx_params_init(sd_ctx_params_t* sd_ctx_params) {
     sd_ctx_params->n_threads               = get_num_physical_cores();
     sd_ctx_params->wtype                   = SD_TYPE_COUNT;
     sd_ctx_params->rng_type                = CUDA_RNG;
+    sd_ctx_params->prediction              = DEFAULT_PRED;
     sd_ctx_params->offload_params_to_cpu   = false;
     sd_ctx_params->keep_clip_on_cpu        = false;
     sd_ctx_params->keep_control_net_on_cpu = false;
@@ -1774,6 +1866,7 @@ char* sd_ctx_params_to_str(const sd_ctx_params_t* sd_ctx_params) {
              "clip_vision_path: %s\n"
              "t5xxl_path: %s\n"
              "qwen2vl_path: %s\n"
+             "qwen2vl_vision_path: %s\n"
              "diffusion_model_path: %s\n"
              "high_noise_diffusion_model_path: %s\n"
              "vae_path: %s\n"
@@ -1788,6 +1881,7 @@ char* sd_ctx_params_to_str(const sd_ctx_params_t* sd_ctx_params) {
              "n_threads: %d\n"
              "wtype: %s\n"
              "rng_type: %s\n"
+             "prediction: %s\n"
              "offload_params_to_cpu: %s\n"
              "keep_clip_on_cpu: %s\n"
              "keep_control_net_on_cpu: %s\n"
@@ -1802,6 +1896,7 @@ char* sd_ctx_params_to_str(const sd_ctx_params_t* sd_ctx_params) {
              SAFE_STR(sd_ctx_params->clip_vision_path),
              SAFE_STR(sd_ctx_params->t5xxl_path),
              SAFE_STR(sd_ctx_params->qwen2vl_path),
+             SAFE_STR(sd_ctx_params->qwen2vl_vision_path),
              SAFE_STR(sd_ctx_params->diffusion_model_path),
              SAFE_STR(sd_ctx_params->high_noise_diffusion_model_path),
              SAFE_STR(sd_ctx_params->vae_path),
@@ -1815,6 +1910,7 @@ char* sd_ctx_params_to_str(const sd_ctx_params_t* sd_ctx_params) {
              sd_ctx_params->n_threads,
              sd_type_name(sd_ctx_params->wtype),
              sd_rng_type_name(sd_ctx_params->rng_type),
+             sd_prediction_name(sd_ctx_params->prediction),
              BOOL_STR(sd_ctx_params->offload_params_to_cpu),
              BOOL_STR(sd_ctx_params->keep_clip_on_cpu),
              BOOL_STR(sd_ctx_params->keep_control_net_on_cpu),
@@ -2012,6 +2108,7 @@ sd_image_t* generate_image_internal(sd_ctx_t* sd_ctx,
                                     sd_image_t control_image,
                                     float control_strength,
                                     sd_pm_params_t pm_params,
+                                    std::vector<sd_image_t*> ref_images,
                                     std::vector<ggml_tensor*> ref_latents,
                                     bool increase_ref_index,
                                     ggml_tensor* concat_latent = NULL,
@@ -2044,6 +2141,14 @@ sd_image_t* generate_image_internal(sd_ctx_t* sd_ctx,
     ggml_tensor* init_img = NULL;
     SDCondition id_cond;
     std::vector<bool> class_tokens_mask;
+
+    ConditionerParams condition_params;
+    condition_params.clip_skip       = clip_skip;
+    condition_params.width           = width;
+    condition_params.height          = height;
+    condition_params.ref_images      = ref_images;
+    condition_params.adm_in_channels = sd_ctx->sd->diffusion_model->get_adm_in_channels();
+
     if (sd_ctx->sd->stacked_id) {
         if (!sd_ctx->sd->pmid_lora->applied) {
             int64_t t0 = ggml_time_ms();
@@ -2066,7 +2171,7 @@ sd_image_t* generate_image_internal(sd_ctx_t* sd_ctx,
             std::vector<sd_image_f32_t> processed_id_images;
             for (int i = 0; i < pm_params.id_images_count; i++) {
                 sd_image_f32_t id_image           = sd_image_t_to_sd_image_f32_t(pm_params.id_images[i]);
-                sd_image_f32_t processed_id_image = clip_preprocess(id_image, clip_image_size);
+                sd_image_f32_t processed_id_image = clip_preprocess(id_image, clip_image_size, clip_image_size);
                 free(id_image.data);
                 id_image.data = NULL;
                 processed_id_images.push_back(processed_id_image);
@@ -2083,17 +2188,15 @@ sd_image_t* generate_image_internal(sd_ctx_t* sd_ctx,
             }
             processed_id_images.clear();
 
-            int64_t t0                    = ggml_time_ms();
-            auto cond_tup                 = sd_ctx->sd->cond_stage_model->get_learned_condition_with_trigger(work_ctx,
-                                                                                                             sd_ctx->sd->n_threads, prompt,
-                                                                                                             clip_skip,
-                                                                                                             width,
-                                                                                                             height,
-                                                                                                             pm_params.id_images_count,
-                                                                                                             sd_ctx->sd->diffusion_model->get_adm_in_channels());
-            id_cond                       = std::get<0>(cond_tup);
-            class_tokens_mask             = std::get<1>(cond_tup);  //
-            struct ggml_tensor* id_embeds = NULL;
+            int64_t t0                      = ggml_time_ms();
+            condition_params.text           = prompt;
+            condition_params.num_input_imgs = pm_params.id_images_count;
+            auto cond_tup                   = sd_ctx->sd->cond_stage_model->get_learned_condition_with_trigger(work_ctx,
+                                                                                                               sd_ctx->sd->n_threads,
+                                                                                                               condition_params);
+            id_cond                         = std::get<0>(cond_tup);
+            class_tokens_mask               = std::get<1>(cond_tup);  //
+            struct ggml_tensor* id_embeds   = NULL;
             if (pmv2 && pm_params.id_embed_path != nullptr) {
                 id_embeds = load_tensor_from_file(work_ctx, pm_params.id_embed_path);
                 // print_ggml_tensor(id_embeds, true, "id_embeds:");
@@ -2119,14 +2222,12 @@ sd_image_t* generate_image_internal(sd_ctx_t* sd_ctx,
     }
 
     // Get learned condition
-    t0               = ggml_time_ms();
-    SDCondition cond = sd_ctx->sd->cond_stage_model->get_learned_condition(work_ctx,
-                                                                           sd_ctx->sd->n_threads,
-                                                                           prompt,
-                                                                           clip_skip,
-                                                                           width,
-                                                                           height,
-                                                                           sd_ctx->sd->diffusion_model->get_adm_in_channels());
+    t0                               = ggml_time_ms();
+    condition_params.text            = prompt;
+    condition_params.zero_out_masked = false;
+    SDCondition cond                 = sd_ctx->sd->cond_stage_model->get_learned_condition(work_ctx,
+                                                                                           sd_ctx->sd->n_threads,
+                                                                                           condition_params);
 
     SDCondition uncond;
     if (guidance.txt_cfg != 1.0 ||
@@ -2135,14 +2236,11 @@ sd_image_t* generate_image_internal(sd_ctx_t* sd_ctx,
         if (sd_version_is_sdxl(sd_ctx->sd->version) && negative_prompt.size() == 0 && !sd_ctx->sd->is_using_edm_v_parameterization) {
             zero_out_masked = true;
         }
-        uncond = sd_ctx->sd->cond_stage_model->get_learned_condition(work_ctx,
-                                                                     sd_ctx->sd->n_threads,
-                                                                     negative_prompt,
-                                                                     clip_skip,
-                                                                     width,
-                                                                     height,
-                                                                     sd_ctx->sd->diffusion_model->get_adm_in_channels(),
-                                                                     zero_out_masked);
+        condition_params.text            = negative_prompt;
+        condition_params.zero_out_masked = zero_out_masked;
+        uncond                           = sd_ctx->sd->cond_stage_model->get_learned_condition(work_ctx,
+                                                                                               sd_ctx->sd->n_threads,
+                                                                                               condition_params);
     }
     int64_t t1 = ggml_time_ms();
     LOG_INFO("get_learned_condition completed, taking %" PRId64 " ms", t1 - t0);
@@ -2563,13 +2661,42 @@ sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* sd_img_g
 
     std::vector<ggml_tensor*> ref_latents;
     for (int i = 0; i < ref_images.size(); i++) {
-        ggml_tensor* img = ggml_new_tensor_4d(work_ctx,
-                                              GGML_TYPE_F32,
-                                              ref_images[i]->width,
-                                              ref_images[i]->height,
-                                              3,
-                                              1);
-        sd_image_to_tensor(*ref_images[i], img);
+        ggml_tensor* img;
+        if (sd_version_is_qwen_image(sd_ctx->sd->version)) {
+            sd_image_f32_t ref_image = sd_image_t_to_sd_image_f32_t(*ref_images[i]);
+            int VAE_IMAGE_SIZE       = std::min(1024 * 1024, width * height);
+            double vae_width         = sqrt(VAE_IMAGE_SIZE * ref_image.width / ref_image.height);
+            double vae_height        = vae_width * ref_image.height / ref_image.width;
+
+            vae_height = round(vae_height / 32) * 32;
+            vae_width  = round(vae_width / 32) * 32;
+
+            sd_image_f32_t resized_image = resize_sd_image_f32_t(ref_image, static_cast<int>(vae_width), static_cast<int>(vae_height));
+            free(ref_image.data);
+            ref_image.data = nullptr;
+
+            LOG_DEBUG("resize vae ref image %d from %dx%d to %dx%d", i, ref_image.height, ref_image.width, resized_image.height, resized_image.width);
+
+            img = ggml_new_tensor_4d(work_ctx,
+                                     GGML_TYPE_F32,
+                                     resized_image.width,
+                                     resized_image.height,
+                                     3,
+                                     1);
+            sd_image_f32_to_tensor(resized_image, img);
+            free(resized_image.data);
+            resized_image.data = nullptr;
+        } else {
+            img = ggml_new_tensor_4d(work_ctx,
+                                     GGML_TYPE_F32,
+                                     ref_images[i]->width,
+                                     ref_images[i]->height,
+                                     3,
+                                     1);
+            sd_image_to_tensor(*ref_images[i], img);
+        }
+
+        // print_ggml_tensor(img, false, "img");
 
         ggml_tensor* latent = sd_ctx->sd->encode_first_stage(work_ctx, img);
         ref_latents.push_back(latent);
@@ -2603,6 +2730,7 @@ sd_image_t* generate_image(sd_ctx_t* sd_ctx, const sd_img_gen_params_t* sd_img_g
                                                         sd_img_gen_params->control_image,
                                                         sd_img_gen_params->control_strength,
                                                         sd_img_gen_params->pm_params,
+                                                        ref_images,
                                                         ref_latents,
                                                         sd_img_gen_params->increase_ref_index,
                                                         concat_latent,
@@ -2860,30 +2988,25 @@ SD_API sd_image_t* generate_video(sd_ctx_t* sd_ctx, const sd_vid_gen_params_t* s
     }
 
     // Get learned condition
-    bool zero_out_masked = true;
-    int64_t t1           = ggml_time_ms();
-    SDCondition cond     = sd_ctx->sd->cond_stage_model->get_learned_condition(work_ctx,
-                                                                               sd_ctx->sd->n_threads,
-                                                                               prompt,
-                                                                               sd_vid_gen_params->clip_skip,
-                                                                               width,
-                                                                               height,
-                                                                               sd_ctx->sd->diffusion_model->get_adm_in_channels(),
-                                                                               zero_out_masked);
-    cond.c_concat        = concat_latent;
-    cond.c_vector        = clip_vision_output;
+    ConditionerParams condition_params;
+    condition_params.clip_skip       = sd_vid_gen_params->clip_skip;
+    condition_params.zero_out_masked = true;
+    condition_params.text            = prompt;
+
+    int64_t t1       = ggml_time_ms();
+    SDCondition cond = sd_ctx->sd->cond_stage_model->get_learned_condition(work_ctx,
+                                                                           sd_ctx->sd->n_threads,
+                                                                           condition_params);
+    cond.c_concat    = concat_latent;
+    cond.c_vector    = clip_vision_output;
     SDCondition uncond;
     if (sd_vid_gen_params->sample_params.guidance.txt_cfg != 1.0 || sd_vid_gen_params->high_noise_sample_params.guidance.txt_cfg != 1.0) {
-        uncond          = sd_ctx->sd->cond_stage_model->get_learned_condition(work_ctx,
-                                                                              sd_ctx->sd->n_threads,
-                                                                              negative_prompt,
-                                                                              sd_vid_gen_params->clip_skip,
-                                                                              width,
-                                                                              height,
-                                                                              sd_ctx->sd->diffusion_model->get_adm_in_channels(),
-                                                                              zero_out_masked);
-        uncond.c_concat = concat_latent;
-        uncond.c_vector = clip_vision_output;
+        condition_params.text = negative_prompt;
+        uncond                = sd_ctx->sd->cond_stage_model->get_learned_condition(work_ctx,
+                                                                                    sd_ctx->sd->n_threads,
+                                                                                    condition_params);
+        uncond.c_concat       = concat_latent;
+        uncond.c_vector       = clip_vision_output;
     }
     int64_t t2 = ggml_time_ms();
     LOG_INFO("get_learned_condition completed, taking %" PRId64 " ms", t2 - t1);

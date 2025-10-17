@@ -62,6 +62,7 @@ struct SDParams {
     std::string clip_vision_path;
     std::string t5xxl_path;
     std::string qwen2vl_path;
+    std::string qwen2vl_vision_path;
     std::string diffusion_model_path;
     std::string high_noise_diffusion_model_path;
     std::string vae_path;
@@ -83,6 +84,7 @@ struct SDParams {
 
     std::string prompt;
     std::string negative_prompt;
+
     int clip_skip   = -1;  // <= 0 represents unspecified
     int width       = 512;
     int height      = 512;
@@ -126,7 +128,10 @@ struct SDParams {
     int chroma_t5_mask_pad   = 1;
     float flow_shift         = INFINITY;
 
+    prediction_t prediction = DEFAULT_PRED;
+
     sd_tiling_params_t vae_tiling_params = {false, 0, 0, 0.5f, 0.0f, 0.0f};
+    bool force_sdxl_vae_conv_scale       = false;
 
     SDParams() {
         sd_sample_params_init(&sample_params);
@@ -148,6 +153,7 @@ void print_params(SDParams params) {
     printf("    clip_vision_path:                  %s\n", params.clip_vision_path.c_str());
     printf("    t5xxl_path:                        %s\n", params.t5xxl_path.c_str());
     printf("    qwen2vl_path:                      %s\n", params.qwen2vl_path.c_str());
+    printf("    qwen2vl_vision_path:               %s\n", params.qwen2vl_vision_path.c_str());
     printf("    diffusion_model_path:              %s\n", params.diffusion_model_path.c_str());
     printf("    high_noise_diffusion_model_path:   %s\n", params.high_noise_diffusion_model_path.c_str());
     printf("    vae_path:                          %s\n", params.vae_path.c_str());
@@ -186,12 +192,14 @@ void print_params(SDParams params) {
     printf("    sample_params:                     %s\n", SAFE_STR(sample_params_str));
     printf("    high_noise_sample_params:          %s\n", SAFE_STR(high_noise_sample_params_str));
     printf("    moe_boundary:                      %.3f\n", params.moe_boundary);
+    printf("    prediction:                        %s\n", sd_prediction_name(params.prediction));
     printf("    flow_shift:                        %.2f\n", params.flow_shift);
     printf("    strength(img2img):                 %.2f\n", params.strength);
     printf("    rng:                               %s\n", sd_rng_type_name(params.rng_type));
     printf("    seed:                              %zd\n", params.seed);
     printf("    batch_count:                       %d\n", params.batch_count);
     printf("    vae_tiling:                        %s\n", params.vae_tiling_params.enabled ? "true" : "false");
+    printf("    force_sdxl_vae_conv_scale:         %s\n", params.force_sdxl_vae_conv_scale ? "true" : "false");
     printf("    upscale_repeats:                   %d\n", params.upscale_repeats);
     printf("    chroma_use_dit_mask:               %s\n", params.chroma_use_dit_mask ? "true" : "false");
     printf("    chroma_use_t5_mask:                %s\n", params.chroma_use_t5_mask ? "true" : "false");
@@ -220,6 +228,7 @@ void print_usage(int argc, const char* argv[]) {
     printf("  --clip_vision                      path to the clip-vision encoder\n");
     printf("  --t5xxl                            path to the t5xxl text encoder\n");
     printf("  --qwen2vl                          path to the qwen2vl text encoder\n");
+    printf("  --qwen2vl_vision                   path to the qwen2vl vit\n");
     printf("  --vae [VAE]                        path to vae\n");
     printf("  --taesd [TAESD_PATH]               path to taesd. Using Tiny AutoEncoder for fast decoding (low quality)\n");
     printf("  --control-net [CONTROL_PATH]       path to control net model\n");
@@ -278,12 +287,14 @@ void print_usage(int argc, const char* argv[]) {
     printf("  --rng {std_default, cuda}          RNG (default: cuda)\n");
     printf("  -s SEED, --seed SEED               RNG seed (default: 42, use random seed for < 0)\n");
     printf("  -b, --batch-count COUNT            number of images to generate\n");
+    printf("  --prediction {eps, v, edm_v, sd3_flow, flux_flow}        Prediction type override.\n");
     printf("  --clip-skip N                      ignore last layers of CLIP network; 1 ignores none, 2 ignores one layer (default: -1)\n");
     printf("                                     <= 0 represents unspecified, will be 1 for SD1.x, 2 for SD2.x\n");
     printf("  --vae-tiling                       process vae in tiles to reduce memory usage\n");
     printf("  --vae-tile-size [X]x[Y]            tile size for vae tiling (default: 32x32)\n");
     printf("  --vae-relative-tile-size [X]x[Y]   relative tile size for vae tiling, in fraction of image size if < 1, in number of tiles per dim if >=1 (overrides --vae-tile-size)\n");
     printf("  --vae-tile-overlap OVERLAP         tile overlap for vae tiling, in fraction of tile size (default: 0.5)\n");
+    printf("  --force-sdxl-vae-conv-scale        force use of conv scale on sdxl vae\n");
     printf("  --vae-on-cpu                       keep vae in cpu (for low vram)\n");
     printf("  --clip-on-cpu                      keep clip in cpu (for low vram)\n");
     printf("  --diffusion-fa                     use flash attention in the diffusion model (for low vram)\n");
@@ -490,6 +501,7 @@ void parse_args(int argc, const char** argv, SDParams& params) {
         {"", "--clip_vision", "", &params.clip_vision_path},
         {"", "--t5xxl", "", &params.t5xxl_path},
         {"", "--qwen2vl", "", &params.qwen2vl_path},
+        {"", "--qwen2vl_vision", "", &params.qwen2vl_vision_path},
         {"", "--diffusion-model", "", &params.diffusion_model_path},
         {"", "--high-noise-diffusion-model", "", &params.high_noise_diffusion_model_path},
         {"", "--vae", "", &params.vae_path},
@@ -553,6 +565,7 @@ void parse_args(int argc, const char** argv, SDParams& params) {
 
     options.bool_options = {
         {"", "--vae-tiling", "", true, &params.vae_tiling_params.enabled},
+        {"", "--force-sdxl-vae-conv-scale", "", true, &params.force_sdxl_vae_conv_scale},
         {"", "--offload-to-cpu", "", true, &params.offload_params_to_cpu},
         {"", "--control-net-cpu", "", true, &params.control_net_cpu},
         {"", "--clip-on-cpu", "", true, &params.clip_on_cpu},
@@ -641,6 +654,20 @@ void parse_args(int argc, const char** argv, SDParams& params) {
         params.high_noise_sample_params.scheduler = str_to_schedule(arg);
         if (params.high_noise_sample_params.scheduler == SCHEDULE_COUNT) {
             fprintf(stderr, "error: invalid high noise scheduler %s\n",
+                    arg);
+            return -1;
+        }
+        return 1;
+    };
+
+    auto on_prediction_arg = [&](int argc, const char** argv, int index) {
+        if (++index >= argc) {
+            return -1;
+        }
+        const char* arg   = argv[index];
+        params.prediction = str_to_prediction(arg);
+        if (params.prediction == PREDICTION_COUNT) {
+            fprintf(stderr, "error: invalid prediction type %s\n",
                     arg);
             return -1;
         }
@@ -803,6 +830,7 @@ void parse_args(int argc, const char** argv, SDParams& params) {
         {"", "--rng", "", on_rng_arg},
         {"-s", "--seed", "", on_seed_arg},
         {"", "--sampling-method", "", on_sample_method_arg},
+        {"", "--prediction", "", on_prediction_arg},
         {"", "--scheduler", "", on_schedule_arg},
         {"", "--skip-layers", "", on_skip_layers_arg},
         {"", "--high-noise-sampling-method", "", on_high_noise_sample_method_arg},
@@ -952,7 +980,7 @@ std::string get_image_params(SDParams params, int64_t seed) {
         parameter_string += " " + std::string(sd_schedule_name(params.sample_params.scheduler));
     }
     parameter_string += ", ";
-    for (const auto& te : {params.clip_l_path, params.clip_g_path, params.t5xxl_path, params.qwen2vl_path}) {
+    for (const auto& te : {params.clip_l_path, params.clip_g_path, params.t5xxl_path, params.qwen2vl_path, params.qwen2vl_vision_path}) {
         if (!te.empty()) {
             parameter_string += "TE: " + sd_basename(te) + ", ";
         }
@@ -1336,6 +1364,7 @@ int main(int argc, const char* argv[]) {
         params.clip_vision_path.c_str(),
         params.t5xxl_path.c_str(),
         params.qwen2vl_path.c_str(),
+        params.qwen2vl_vision_path.c_str(),
         params.diffusion_model_path.c_str(),
         params.high_noise_diffusion_model_path.c_str(),
         params.vae_path.c_str(),
@@ -1349,6 +1378,7 @@ int main(int argc, const char* argv[]) {
         params.n_threads,
         params.wtype,
         params.rng_type,
+        params.prediction,
         params.offload_params_to_cpu,
         params.clip_on_cpu,
         params.control_net_cpu,
@@ -1356,6 +1386,7 @@ int main(int argc, const char* argv[]) {
         params.diffusion_flash_attn,
         params.diffusion_conv_direct,
         params.vae_conv_direct,
+        params.force_sdxl_vae_conv_scale,
         params.chroma_use_dit_mask,
         params.chroma_use_t5_mask,
         params.chroma_t5_mask_pad,

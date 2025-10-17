@@ -197,8 +197,11 @@ __STATIC_INLINE__ float sd_image_get_f32(sd_image_t image, int iw, int ih, int i
     return value;
 }
 
-__STATIC_INLINE__ float sd_image_get_f32(sd_image_f32_t image, int iw, int ih, int ic) {
+__STATIC_INLINE__ float sd_image_get_f32(sd_image_f32_t image, int iw, int ih, int ic, bool scale = true) {
     float value = *(image.data + ih * image.width * image.channel + iw * image.channel + ic);
+    if (scale) {
+        value /= 255.f;
+    }
     return value;
 }
 
@@ -372,12 +375,14 @@ __STATIC_INLINE__ float sigmoid(float x) {
 
 // SPECIAL OPERATIONS WITH TENSORS
 
-__STATIC_INLINE__ uint8_t* sd_tensor_to_image(struct ggml_tensor* input) {
+__STATIC_INLINE__ uint8_t* sd_tensor_to_image(struct ggml_tensor* input, uint8_t* image_data = nullptr) {
     int64_t width    = input->ne[0];
     int64_t height   = input->ne[1];
     int64_t channels = input->ne[2];
     GGML_ASSERT(channels == 3 && input->type == GGML_TYPE_F32);
-    uint8_t* image_data = (uint8_t*)malloc(width * height * channels);
+    if (image_data == nullptr) {
+        image_data = (uint8_t*)malloc(width * height * channels);
+    }
     for (int iy = 0; iy < height; iy++) {
         for (int ix = 0; ix < width; ix++) {
             for (int k = 0; k < channels; k++) {
@@ -456,24 +461,18 @@ __STATIC_INLINE__ void sd_apply_mask(struct ggml_tensor* image_data,
     }
 }
 
-__STATIC_INLINE__ void sd_image_f32_to_tensor(const float* image_data,
-                                              struct ggml_tensor* output,
+__STATIC_INLINE__ void sd_image_f32_to_tensor(sd_image_f32_t image,
+                                              ggml_tensor* tensor,
                                               bool scale = true) {
-    int64_t width    = output->ne[0];
-    int64_t height   = output->ne[1];
-    int64_t channels = output->ne[2];
-    GGML_ASSERT(channels == 3 && output->type == GGML_TYPE_F32);
-    for (int iy = 0; iy < height; iy++) {
-        for (int ix = 0; ix < width; ix++) {
-            for (int k = 0; k < channels; k++) {
-                int value = *(image_data + iy * width * channels + ix * channels + k);
-                if (scale) {
-                    value /= 255.f;
-                }
-                ggml_tensor_set_f32(output, value, ix, iy, k);
-            }
-        }
-    }
+    GGML_ASSERT(image.width == tensor->ne[0]);
+    GGML_ASSERT(image.height == tensor->ne[1]);
+    GGML_ASSERT(image.channel == tensor->ne[2]);
+    GGML_ASSERT(1 == tensor->ne[3]);
+    GGML_ASSERT(tensor->type == GGML_TYPE_F32);
+    ggml_tensor_iter(tensor, [&](ggml_tensor* tensor, int64_t i0, int64_t i1, int64_t i2, int64_t i3) {
+        float value = sd_image_get_f32(image, i0, i1, i2, scale);
+        ggml_tensor_set_f32(tensor, value, i0, i1, i2, i3);
+    });
 }
 
 __STATIC_INLINE__ void ggml_split_tensor_2d(struct ggml_tensor* input,
@@ -976,38 +975,28 @@ __STATIC_INLINE__ struct ggml_tensor* ggml_nn_conv_2d(struct ggml_context* ctx,
                                                       struct ggml_tensor* x,
                                                       struct ggml_tensor* w,
                                                       struct ggml_tensor* b,
-                                                      int s0 = 1,
-                                                      int s1 = 1,
-                                                      int p0 = 0,
-                                                      int p1 = 0,
-                                                      int d0 = 1,
-                                                      int d1 = 1) {
-    x = ggml_conv_2d(ctx, w, x, s0, s1, p0, p1, d0, d1);
-    if (b != NULL) {
-        b = ggml_reshape_4d(ctx, b, 1, 1, b->ne[0], 1);
-        // b = ggml_repeat(ctx, b, x);
-        x = ggml_add_inplace(ctx, x, b);
+                                                      int s0      = 1,
+                                                      int s1      = 1,
+                                                      int p0      = 0,
+                                                      int p1      = 0,
+                                                      int d0      = 1,
+                                                      int d1      = 1,
+                                                      bool direct = false,
+                                                      float scale = 1.f) {
+    if (scale != 1.f) {
+        x = ggml_scale(ctx, x, scale);
     }
-    return x;
-}
-
-// w: [OC*IC, KD, KH, KW]
-// x: [N*IC, ID, IH, IW]
-__STATIC_INLINE__ struct ggml_tensor* ggml_nn_conv_2d_direct(struct ggml_context* ctx,
-                                                             struct ggml_tensor* x,
-                                                             struct ggml_tensor* w,
-                                                             struct ggml_tensor* b,
-                                                             int s0 = 1,
-                                                             int s1 = 1,
-                                                             int p0 = 0,
-                                                             int p1 = 0,
-                                                             int d0 = 1,
-                                                             int d1 = 1) {
-    x = ggml_conv_2d_direct(ctx, w, x, s0, s1, p0, p1, d0, d1);
+    if (direct) {
+        x = ggml_conv_2d_direct(ctx, w, x, s0, s1, p0, p1, d0, d1);
+    } else {
+        x = ggml_conv_2d(ctx, w, x, s0, s1, p0, p1, d0, d1);
+    }
+    if (scale != 1.f) {
+        x = ggml_scale(ctx, x, 1.f / scale);
+    }
     if (b != NULL) {
         b = ggml_reshape_4d(ctx, b, 1, 1, b->ne[0], 1);
-        // b = ggml_repeat(ctx, b, x);
-        x = ggml_add(ctx, x, b);
+        x = ggml_add_inplace(ctx, x, b);
     }
     return x;
 }
@@ -2068,6 +2057,7 @@ protected:
     std::pair<int, int> dilation;
     bool bias;
     bool direct = false;
+    float scale = 1.f;
 
     void init_params(struct ggml_context* ctx, const String2GGMLType& tensor_types, const std::string prefix = "") {
         enum ggml_type wtype = GGML_TYPE_F16;
@@ -2098,6 +2088,10 @@ public:
         direct = true;
     }
 
+    void set_scale(float scale_value) {
+        scale = scale_value;
+    }
+
     std::string get_desc() {
         return "Conv2d";
     }
@@ -2108,11 +2102,18 @@ public:
         if (bias) {
             b = params["bias"];
         }
-        if (direct) {
-            return ggml_nn_conv_2d_direct(ctx, x, w, b, stride.second, stride.first, padding.second, padding.first, dilation.second, dilation.first);
-        } else {
-            return ggml_nn_conv_2d(ctx, x, w, b, stride.second, stride.first, padding.second, padding.first, dilation.second, dilation.first);
-        }
+        return ggml_nn_conv_2d(ctx,
+                               x,
+                               w,
+                               b,
+                               stride.second,
+                               stride.first,
+                               padding.second,
+                               padding.first,
+                               dilation.second,
+                               dilation.first,
+                               direct,
+                               scale);
     }
 };
 

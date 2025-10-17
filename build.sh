@@ -23,7 +23,7 @@ SD_SRC_CLI="";      : "${SD_SRC:=}"
 # Pinned refs (only checked and warned; no automatic checkout)
 LLAMA_EXPECT_REF="b6746"
 WHISPER_EXPECT_TAG="v1.8.1"
-SD_EXPECT_REF="1c32fa0"
+SD_EXPECT_REF="0585e2609d26fc73cde0dd963127ae585ca62d49"
 
 usage() {
   echo "Usage: $0 [-p projects] [-d devices] [-j jobs] [--clean] [--llama-src PATH] [--whisper-src PATH] [--sd-src PATH]"

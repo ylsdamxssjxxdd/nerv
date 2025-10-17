@@ -17,7 +17,7 @@ $OS_ID     = 'win'
 # Pinned references (only checked/warned)
 $LLAMA_EXPECT_REF = 'b6746'
 $WHISPER_EXPECT_TAG = 'v1.8.1'
-$SD_EXPECT_REF = '1c32fa0'
+$SD_EXPECT_REF = '0585e2609d26fc73cde0dd963127ae585ca62d49'
 
 function Resolve-Arch {
   $arch = $env:PROCESSOR_ARCHITECTURE

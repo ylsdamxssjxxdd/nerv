@@ -143,4 +143,6 @@ inline bool mmap::open(const char *path) {
             LOG_INFO("Vulkan selected device: %d - %s", dev, desc);
         }
 #endif
+
 ```
+- 搜索set(GGML_WIN_VER "0x602" CACHE STRING   "ggml: Windows version")替换为set(GGML_WIN_VER "0x601" CACHE STRING   "ggml: Windows version")
